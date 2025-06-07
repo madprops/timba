@@ -21,7 +21,10 @@ struct TimbaApp {
 }
 
 impl App for TimbaApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+        // Always request repaint to keep checking for new messages
+        ctx.request_repaint();
+
         // Check for new image path requests
         if let Ok(new_path) = self.image_receiver.try_recv() {
             println!(">>> Received new image path in UI thread: {}", new_path);
@@ -31,24 +34,16 @@ impl App for TimbaApp {
             self.error_message = None;
             self.original_size = None;
 
-            // Reset the resize flag - but don't resize window for subsequent images
-            unsafe {
-                RESIZED.store(true, std::sync::atomic::Ordering::Relaxed); // Already resized, don't resize again
-            }
-
-            // Load the image immediately instead of waiting for next frame
+            // Load the image immediately
             self.load_image(ctx);
 
-            // Request multiple repaints to ensure UI updates quickly
-            ctx.request_repaint();
-            println!(">>> Requested UI repaint");
+            println!(">>> Image loaded and UI updated");
         }
 
-        // Now only load the image on first update since we're loading immediately above
-        if self.texture.is_none() && !self.image_path.is_empty() {
-            println!(">>> Loading image: {}", self.image_path);
+        // Remove the redundant loading logic - only load on startup if no image is set
+        if self.texture.is_none() && !self.image_path.is_empty() && self.error_message.is_none() {
+            // This should only happen on initial startup
             self.load_image(ctx);
-            ctx.request_repaint(); // Request another repaint after loading
         }
 
         // Rest of the update function remains the same
@@ -81,26 +76,11 @@ impl App for TimbaApp {
                     let padding_y = (available_size.y - displayed_size.y) / 2.0;
 
                     ui.allocate_space(egui::vec2(available_size.x, padding_y));
+
                     ui.horizontal(|ui| {
                         ui.add_space(padding_x);
                         ui.add(egui::Image::new(texture, displayed_size));
                     });
-                }
-
-                // Initial resize to fit image with some padding - only for first image
-                if self.original_size.is_some() {
-                    unsafe {
-                        if !RESIZED.load(std::sync::atomic::Ordering::Relaxed) {
-                            let original_size = self.original_size.unwrap();
-                            let window_size = egui::vec2(
-                                original_size.x + 40.0,
-                                original_size.y + 60.0
-                            );
-                            frame.set_window_size(window_size);
-                            RESIZED.store(true, std::sync::atomic::Ordering::Relaxed);
-                            println!(">>> Window resized for first image");
-                        }
-                    }
                 }
             } else {
                 ui.label("Loading image...");
@@ -108,9 +88,6 @@ impl App for TimbaApp {
         });
     }
 }
-
-// Make RESIZED static variable accessible throughout the code
-static mut RESIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl TimbaApp {
     fn new(image_path: String, image_receiver: mpsc::Receiver<String>) -> Self {
