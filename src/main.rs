@@ -1,6 +1,8 @@
 use eframe::{egui, App, Frame};
 #[allow(unused_imports)]
 use image::io::Reader as ImageReader;
+use image::codecs::gif::GifDecoder;
+use image::AnimationDecoder;
 use image::GenericImageView;
 use std::env;
 use std::path::Path;
@@ -18,6 +20,11 @@ struct TimbaApp {
     error_message: Option<String>,
     original_size: Option<egui::Vec2>,
     image_receiver: mpsc::Receiver<String>,
+    // New fields for animation
+    gif_frames: Option<Vec<(egui::ColorImage, std::time::Duration)>>,
+    current_frame: usize,
+    last_frame_time: std::time::Instant,
+    is_animated: bool,
 }
 
 impl App for TimbaApp {
@@ -33,6 +40,10 @@ impl App for TimbaApp {
             self.texture = None;
             self.error_message = None;
             self.original_size = None;
+            // Reset animation state when loading new image
+            self.gif_frames = None;
+            self.current_frame = 0;
+            self.is_animated = false;
 
             // Load the image immediately
             self.load_image(ctx);
@@ -44,6 +55,22 @@ impl App for TimbaApp {
         if self.texture.is_none() && !self.image_path.is_empty() && self.error_message.is_none() {
             // This should only happen on initial startup
             self.load_image(ctx);
+        }
+
+        // Handle GIF animation timing
+        if self.is_animated {
+            if let Some(ref frames) = self.gif_frames {
+                let current_time = std::time::Instant::now();
+                if self.current_frame < frames.len() {
+                    let frame_duration = frames[self.current_frame].1;
+
+                    if current_time.duration_since(self.last_frame_time) >= frame_duration {
+                        self.current_frame = (self.current_frame + 1) % frames.len();
+                        self.last_frame_time = current_time;
+                        self.update_texture(ctx);
+                    }
+                }
+            }
         }
 
         // Rest of the update function remains the same
@@ -97,11 +124,27 @@ impl TimbaApp {
             error_message: None,
             original_size: None,
             image_receiver,
+            // Initialize the new animation fields
+            gif_frames: None,
+            current_frame: 0,
+            last_frame_time: std::time::Instant::now(),
+            is_animated: false,
+        }
+    }
+
+    fn load_image(&mut self, ctx: &egui::Context) {
+        let path = Path::new(&self.image_path);
+
+        // Check if it's a GIF
+        if path.extension().and_then(|s| s.to_str()) == Some("gif") {
+            self.load_gif(ctx);
+        } else {
+            self.load_static_image(ctx);
         }
     }
 
     // The load_image function
-    fn load_image(&mut self, ctx: &egui::Context) {
+    fn load_static_image(&mut self, ctx: &egui::Context) {
         let path = Path::new(&self.image_path);
 
         // Try to load the image
@@ -124,11 +167,73 @@ impl TimbaApp {
                 );
 
                 self.texture = Some(texture);
-                println!(">>> Image loaded successfully: {}x{}", width, height);
+                // Ensure static images don't animate
+                self.is_animated = false;
+                self.gif_frames = None;
+                println!(">>> Static image loaded successfully: {}x{}", width, height);
             }
             Err(err) => {
                 self.error_message = Some(format!("Failed to load image: {}", err));
                 println!(">>> Failed to load image: {}", err);
+            }
+        }
+    }
+
+    fn load_gif(&mut self, ctx: &egui::Context) {
+        let file = match std::fs::File::open(&self.image_path) {
+            Ok(file) => file,
+            Err(e) => {
+                self.error_message = Some(format!("Failed to open file: {}", e));
+                return;
+            }
+        };
+
+        let decoder = GifDecoder::new(file).unwrap();
+        let frames = decoder.into_frames();
+        let mut gif_frames = Vec::new();
+
+        for frame_result in frames {
+            match frame_result {
+                Ok(frame) => {
+                    let delay = frame.delay();
+                    let duration = std::time::Duration::from(delay);
+                    let buffer = frame.into_buffer();
+                    let (width, height) = buffer.dimensions();
+
+                    let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                        [width as usize, height as usize],
+                        &buffer.into_raw()
+                    );
+
+                    gif_frames.push((color_image, duration));
+                }
+                Err(e) => {
+                    self.error_message = Some(format!("Failed to decode frame: {}", e));
+                    return;
+                }
+            }
+        }
+
+        if !gif_frames.is_empty() {
+            let (width, height) = (gif_frames[0].0.width(), gif_frames[0].0.height());
+            self.original_size = Some(egui::vec2(width as f32, height as f32));
+            self.gif_frames = Some(gif_frames);
+            self.current_frame = 0;
+            self.last_frame_time = std::time::Instant::now();
+            self.is_animated = true;
+            self.update_texture(ctx);
+        }
+    }
+
+    fn update_texture(&mut self, ctx: &egui::Context) {
+        if let Some(ref frames) = self.gif_frames {
+            if self.current_frame < frames.len() {
+                let texture = ctx.load_texture(
+                    format!("gif_frame_{}", self.current_frame),
+                    frames[self.current_frame].0.clone(),
+                    egui::TextureFilter::Linear,
+                );
+                self.texture = Some(texture);
             }
         }
     }
