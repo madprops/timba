@@ -308,6 +308,7 @@ fn main() {
 
         // Wait for acknowledgment
         let mut buffer = [0; 3];
+
         match stream.read(&mut buffer) {
             Ok(bytes) if bytes > 0 => {
                 let response = std::str::from_utf8(&buffer[0..bytes]).unwrap_or("???");
@@ -316,6 +317,7 @@ fn main() {
             Ok(_) => println!("No response received from instance"),
             Err(e) => println!("Error waiting for acknowledgment: {}", e),
         }
+
         println!("Image sent to existing Timba instance");
         return; // Exit this instance
     }
