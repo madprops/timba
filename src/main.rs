@@ -1,8 +1,3 @@
-use eframe::{egui, App, Frame};
-use image::io::Reader as ImageReader;
-use image::codecs::gif::GifDecoder;
-use image::AnimationDecoder;
-use image::GenericImageView;
 use std::env;
 use std::path::Path;
 use std::os::unix::net::{UnixStream, UnixListener};
@@ -10,6 +5,11 @@ use std::io::{Read, Write};
 use std::thread;
 use std::sync::mpsc;
 use std::fs;
+use eframe::{egui, App, Frame};
+use image::io::Reader as ImageReader;
+use image::codecs::gif::GifDecoder;
+use image::AnimationDecoder;
+use image::GenericImageView;
 
 const SOCKET_PATH: &str = "/tmp/timba.sock";
 
