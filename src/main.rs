@@ -1,5 +1,4 @@
 use eframe::{egui, App, Frame};
-#[allow(unused_imports)]
 use image::io::Reader as ImageReader;
 use image::codecs::gif::GifDecoder;
 use image::AnimationDecoder;
@@ -20,7 +19,6 @@ struct TimbaApp {
     error_message: Option<String>,
     original_size: Option<egui::Vec2>,
     image_receiver: mpsc::Receiver<String>,
-    // New fields for animation
     gif_frames: Option<Vec<(egui::ColorImage, std::time::Duration)>>,
     current_frame: usize,
     last_frame_time: std::time::Instant,
@@ -124,7 +122,6 @@ impl TimbaApp {
             error_message: None,
             original_size: None,
             image_receiver,
-            // Initialize the new animation fields
             gif_frames: None,
             current_frame: 0,
             last_frame_time: std::time::Instant::now(),
@@ -333,6 +330,7 @@ fn main() {
     thread::spawn(move || {
         if let Ok(listener) = UnixListener::bind(SOCKET_PATH) {
             println!("Listening on socket for new image paths");
+
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
                     let mut buffer = [0; 4096];  // Create a fixed-size buffer for the path
@@ -375,6 +373,7 @@ fn main() {
 
     // Set up cleanup of socket file when program exits
     let socket_path = SOCKET_PATH.to_string();
+
     ctrlc::set_handler(move || {
         println!("Cleaning up socket file...");
         let _ = fs::remove_file(&socket_path);
