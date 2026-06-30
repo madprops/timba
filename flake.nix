@@ -22,6 +22,7 @@
           pkg-config
           cargo
           rustc
+          rustfmt
         ];
 
         buildInputs = runtimeLibs;

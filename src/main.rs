@@ -1,14 +1,14 @@
-use std::env;
-use std::path::Path;
-use std::os::unix::net::{UnixStream, UnixListener};
-use std::io::{Read, Write, BufReader};
-use std::thread;
-use std::sync::mpsc;
-use std::fs;
 use eframe::{egui, App, Frame};
-use image::ImageReader;
 use image::codecs::gif::GifDecoder;
 use image::AnimationDecoder;
+use image::ImageReader;
+use std::env;
+use std::fs;
+use std::io::{BufReader, Read, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::Path;
+use std::sync::mpsc;
+use std::thread;
 
 const SOCKET_PATH: &str = "/tmp/timba.sock";
 
@@ -22,38 +22,32 @@ struct TimbaApp {
     current_frame: usize,
     last_frame_time: std::time::Instant,
     is_animated: bool,
+    is_maximized: bool,
 }
 
 impl App for TimbaApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
-        // Always request repaint to keep checking for new messages
         ui.ctx().request_repaint();
 
-        // Check for new image path requests
+        if let Some(real_maximized_state) = ui.input(|i| i.viewport().maximized) {
+            self.is_maximized = real_maximized_state;
+        }
+
         if let Ok(new_path) = self.image_receiver.try_recv() {
-            println!(">>> Received new image path in UI thread: {}", new_path);
-            println!(">>> Previous path was: {}", self.image_path);
             self.image_path = new_path;
             self.texture = None;
             self.error_message = None;
             self.original_size = None;
-            // Reset animation state when loading new image
             self.gif_frames = None;
             self.current_frame = 0;
             self.is_animated = false;
-
-            // Load the image immediately
             self.load_image(ui.ctx());
-            println!(">>> Image loaded and UI updated");
         }
 
-        // Remove the redundant loading logic - only load on startup if no image is set
         if self.texture.is_none() && !self.image_path.is_empty() && self.error_message.is_none() {
-            // This should only happen on initial startup
             self.load_image(ui.ctx());
         }
 
-        // Handle GIF animation timing
         if self.is_animated {
             if let Some(ref frames) = self.gif_frames {
                 let current_time = std::time::Instant::now();
@@ -70,47 +64,57 @@ impl App for TimbaApp {
             }
         }
 
-        // Rest of the update function remains the same
-        egui::CentralPanel::default().show(ui, |ui| {
-            // Show error message if any
-            if let Some(error) = &self.error_message {
-                ui.label(format!("Error: {}", error));
-                return;
-            }
+        let response = egui::CentralPanel::default()
+            .show(ui, |ui| {
+                ui.set_min_size(egui::Vec2::ZERO);
 
-            // Show the image with proper scaling
-            if let Some(texture) = &self.texture {
-                if let Some(original_size) = self.original_size {
-                    // Get available space in the panel
-                    let available_size = ui.available_size();
-
-                    // Calculate scale factor to fit the image in the available space
-                    let scale_x = available_size.x / original_size.x;
-                    let scale_y = available_size.y / original_size.y;
-                    let scale = scale_x.min(scale_y).min(1.0); // Don't scale above 100%
-
-                    // Calculate displayed size
-                    let displayed_size = egui::vec2(
-                        original_size.x * scale,
-                        original_size.y * scale
-                    );
-
-                    // Center the image
-                    let padding_x = (available_size.x - displayed_size.x) / 2.0;
-                    let padding_y = (available_size.y - displayed_size.y) / 2.0;
-
-                    ui.allocate_space(egui::vec2(available_size.x, padding_y));
-
-                    ui.horizontal(|ui| {
-                        ui.add_space(padding_x);
-                        ui.add(egui::Image::new(texture).fit_to_exact_size(displayed_size));
-                    });
+                if let Some(error) = &self.error_message {
+                    ui.label(format!("Error: {}", error));
+                    return;
                 }
-            }
-            else {
-                ui.label("Loading image...");
-            }
-        });
+
+                if let Some(texture) = &self.texture {
+                    if let Some(original_size) = self.original_size {
+                        let available_size = ui.available_size();
+
+                        let scale_x = available_size.x / original_size.x;
+                        let scale_y = available_size.y / original_size.y;
+
+                        // Removed the 1.0 cap entirely so it always scales up or down
+                        let scale = scale_x.min(scale_y);
+
+                        let displayed_size =
+                            egui::vec2(original_size.x * scale, original_size.y * scale);
+
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(((available_size.y - displayed_size.y) / 2.0).max(0.0));
+
+                            let img = egui::Image::new(texture)
+                                .fit_to_exact_size(displayed_size)
+                                .sense(egui::Sense::click());
+                            let img_response = ui.add(img);
+
+                            if img_response.double_clicked() {
+                                self.is_maximized = !self.is_maximized;
+                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(
+                                    self.is_maximized,
+                                ));
+                            }
+                        });
+                    }
+                } else {
+                    ui.label("Loading image...");
+                }
+            })
+            .response;
+
+        let interact_response = response.interact(egui::Sense::click());
+
+        if interact_response.double_clicked() {
+            self.is_maximized = !self.is_maximized;
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(self.is_maximized));
+        }
     }
 }
 
@@ -126,6 +130,7 @@ impl TimbaApp {
             current_frame: 0,
             last_frame_time: std::time::Instant::now(),
             is_animated: false,
+            is_maximized: false,
         }
     }
 
@@ -135,8 +140,7 @@ impl TimbaApp {
         // Check if it's a GIF
         if path.extension().and_then(|s| s.to_str()) == Some("gif") {
             self.load_gif(ctx);
-        }
-        else {
+        } else {
             self.load_static_image(ctx);
         }
     }
@@ -168,7 +172,6 @@ impl TimbaApp {
                 // Ensure static images don't animate
                 self.is_animated = false;
                 self.gif_frames = None;
-                println!(">>> Static image loaded successfully: {}x{}", width, height);
             }
             Err(err) => {
                 self.error_message = Some(format!("Failed to load image: {}", err));
@@ -179,9 +182,7 @@ impl TimbaApp {
 
     fn load_gif(&mut self, ctx: &egui::Context) {
         let file = match std::fs::File::open(&self.image_path) {
-            Ok(file) => {
-                file
-            }
+            Ok(file) => file,
             Err(e) => {
                 self.error_message = Some(format!("Failed to open file: {}", e));
                 return;
@@ -192,9 +193,7 @@ impl TimbaApp {
 
         // Added error handling to prevent thread panic on corrupted GIFs
         let decoder = match GifDecoder::new(reader) {
-            Ok(d) => {
-                d
-            }
+            Ok(d) => d,
             Err(e) => {
                 self.error_message = Some(format!("Failed to initialize GIF decoder: {}", e));
                 return;
@@ -214,7 +213,7 @@ impl TimbaApp {
 
                     let color_image = egui::ColorImage::from_rgba_unmultiplied(
                         [width as usize, height as usize],
-                        &buffer.into_raw()
+                        &buffer.into_raw(),
                     );
 
                     gif_frames.push((color_image, duration));
@@ -245,8 +244,7 @@ impl TimbaApp {
                 // BUG FIX: Set the existing texture instead of loading a new one to prevent GPU memory leak
                 if let Some(ref mut texture) = self.texture {
                     texture.set(color_image, egui::TextureOptions::LINEAR);
-                }
-                else {
+                } else {
                     self.texture = Some(ctx.load_texture(
                         "gif_frame",
                         color_image,
@@ -275,7 +273,10 @@ fn main() -> eframe::Result<()> {
     let image_path = args[1].clone();
 
     // Normalize and validate the path
-    let image_path = std::fs::canonicalize(image_path).unwrap_or_else(|_| Path::new(&args[1]).to_path_buf()).to_string_lossy().into_owned();
+    let image_path = std::fs::canonicalize(image_path)
+        .unwrap_or_else(|_| Path::new(&args[1]).to_path_buf())
+        .to_string_lossy()
+        .into_owned();
 
     if !Path::new(&image_path).exists() {
         eprintln!("Error: Image path does not exist: {}", image_path);
@@ -285,7 +286,10 @@ fn main() -> eframe::Result<()> {
     // Try to connect to existing instance
     if let Ok(mut stream) = UnixStream::connect(SOCKET_PATH) {
         // Send the image path to the existing instance
-        println!("Connected to existing Timba instance, sending path: {}", image_path);
+        println!(
+            "Connected to existing Timba instance, sending path: {}",
+            image_path
+        );
 
         // Send the full path to the running instance
         if let Err(e) = stream.write_all(image_path.as_bytes()) {
@@ -329,33 +333,26 @@ fn main() -> eframe::Result<()> {
     // Start listening for new connections
     thread::spawn(move || {
         if let Ok(listener) = UnixListener::bind(SOCKET_PATH) {
-            println!("Listening on socket for new image paths");
-
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
-                    let mut buffer = [0; 4096];  // Create a fixed-size buffer for the path
+                    let mut buffer = [0; 4096]; // Create a fixed-size buffer for the path
 
                     match stream.read(&mut buffer) {
                         Ok(bytes_read) if bytes_read > 0 => {
                             // Convert the bytes to a string, ignoring any non-UTF8 characters
                             let path = String::from_utf8_lossy(&buffer[0..bytes_read]).into_owned();
-                            println!("Socket received path: {}", path);
 
                             // Make sure we're getting a valid path
                             if Path::new(&path).exists() {
-                                println!("Path exists, sending to main thread");
-
                                 // Send path to main thread and acknowledge receipt
                                 if let Err(e) = tx.send(path) {
                                     eprintln!("Failed to send image path internally: {}", e);
                                     let _ = stream.write_all(b"ERR");
-                                }
-                                else {
+                                } else {
                                     // Send acknowledgment back to client
                                     let _ = stream.write_all(b"OK");
                                 }
-                            }
-                            else {
+                            } else {
                                 eprintln!("Received path does not exist: {}", path);
                                 let _ = stream.write_all(b"ERR");
                             }
@@ -371,8 +368,7 @@ fn main() -> eframe::Result<()> {
                     }
                 }
             }
-        }
-        else {
+        } else {
             eprintln!("Failed to bind to socket {}", SOCKET_PATH);
         }
     });
@@ -384,16 +380,16 @@ fn main() -> eframe::Result<()> {
         println!("Cleaning up socket file...");
         let _ = fs::remove_file(&socket_path);
         std::process::exit(0);
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     // Get image dimensions for optimal window sizing
     let initial_size = if let Some((width, height)) = get_image_dimensions(&image_path) {
         egui::vec2(
             (width as f32 + 40.0).min(1200.0), // Cap max size
-            (height as f32 + 60.0).min(800.0)
+            (height as f32 + 60.0).min(800.0),
         )
-    }
-    else {
+    } else {
         egui::vec2(800.0, 600.0)
     };
 
@@ -408,11 +404,7 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native(
-        "Timba",
-        options,
-        Box::new(|_cc| Ok(Box::new(app))),
-    )?;
+    eframe::run_native("Timba", options, Box::new(|_cc| Ok(Box::new(app))))?;
 
     // Clean up socket when exiting normally
     let _ = fs::remove_file(SOCKET_PATH);

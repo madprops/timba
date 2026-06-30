@@ -2,10 +2,13 @@ import os
 import time
 import random
 import subprocess
+import socket
 
 BASE_DIR = "/mnt/struct_1/pics/"
-INTERVAL_SECONDS = 300
+INTERVAL_SECONDS = 30
 VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif"}
+SOCKET_PATH = "/tmp/timba.sock"
+BINARY_PATH = "target/release/timba"
 
 
 def get_all_images(base_dir):
@@ -18,28 +21,45 @@ def get_all_images(base_dir):
     return images
 
 
+def send_to_socket(image_path):
+    """Sends the new path to the running Timba instance."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.connect(SOCKET_PATH)
+            client.sendall(image_path.encode("utf-8"))
+            response = client.recv(3)
+            return response == b"OK"
+    except (ConnectionRefusedError, FileNotFoundError):
+        return False
+
+
 def main():
     images = get_all_images(BASE_DIR)
-
     if not images:
-        print("No images found in the specified directory. Exiting.")
+        print("No images found. Exiting.")
         return
 
-    print(f"Found {len(images)} images. Starting the loop...")
     random.shuffle(images)
+    print(f"Found {len(images)} images. Starting the loop...")
+
+    # Start the first instance
+    current_image = images.pop()
+    print(current_image)
+    proc = subprocess.Popen([BINARY_PATH, current_image])
 
     while images:
+        time.sleep(INTERVAL_SECONDS)
         image_path = images.pop()
-        print(f"Running timba on: {image_path}")
+        print(image_path)
 
-        # This will wait for the command to finish.
-        # If timba is a blocking GUI, use subprocess.Popen instead.
-        subprocess.run(["target/release/timba", image_path])
+        # Try to send the new path to the socket
+        if not send_to_socket(image_path):
+            print("Instance not responding, restarting...")
+            # If the process died, clean up and restart
+            proc.terminate()
+            proc = subprocess.Popen([BINARY_PATH, image_path])
 
-        if images:
-            time.sleep(INTERVAL_SECONDS)
-
-    print("No more images left. Quitting.")
+    print("No more images left.")
 
 
 if __name__ == "__main__":
