@@ -9,7 +9,6 @@ use eframe::{egui, App, Frame};
 use image::ImageReader;
 use image::codecs::gif::GifDecoder;
 use image::AnimationDecoder;
-use image::GenericImageView;
 
 const SOCKET_PATH: &str = "/tmp/timba.sock";
 
@@ -259,31 +258,6 @@ impl TimbaApp {
     }
 }
 
-// Load the embedded icon
-fn load_embedded_icon() -> Option<egui::IconData> {
-    // Include the icon directly in the binary
-    let icon_bytes = include_bytes!("../img/icon.png");
-
-    match image::load_from_memory(icon_bytes) {
-        Ok(img) => {
-            let rgba = img.to_rgba8();
-            let (width, height) = img.dimensions();
-
-            println!("Successfully loaded embedded icon: {}x{} pixels", width, height);
-
-            Some(egui::IconData {
-                rgba: rgba.into_raw(),
-                width,
-                height,
-            })
-        }
-        Err(err) => {
-            eprintln!("Failed to load embedded icon: {}", err);
-            None
-        }
-    }
-}
-
 fn get_image_dimensions(path: &str) -> Option<(u32, u32)> {
     ImageReader::open(path).ok()?.into_dimensions().ok()
 }
@@ -425,13 +399,9 @@ fn main() -> eframe::Result<()> {
 
     let app = TimbaApp::new(image_path, rx);
 
-    let mut viewport = egui::ViewportBuilder::default()
+    let viewport = egui::ViewportBuilder::default()
         .with_inner_size(initial_size)
         .with_resizable(true);
-
-    if let Some(icon) = load_embedded_icon() {
-        viewport = viewport.with_icon(std::sync::Arc::new(icon));
-    }
 
     let options = eframe::NativeOptions {
         viewport,
