@@ -43,6 +43,26 @@ impl App for TimbaApp {
             self.load_image(ui.ctx());
         }
 
+        let mut new_dropped_path = None;
+        ui.input(|i| {
+            if !i.raw.dropped_files.is_empty() {
+                if let Some(path) = &i.raw.dropped_files[0].path {
+                    new_dropped_path = Some(path.clone());
+                }
+            }
+        });
+
+        if let Some(path) = new_dropped_path {
+            self.image_path = path.to_string_lossy().into_owned();
+            self.texture = None;
+            self.error_message = None;
+            self.original_size = None;
+            self.gif_frames = None;
+            self.current_frame = 0;
+            self.is_animated = false;
+            self.load_image(ui.ctx());
+        }
+
         if self.texture.is_none() && !self.image_path.is_empty() && self.error_message.is_none() {
             self.load_image(ui.ctx());
         }
