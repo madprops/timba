@@ -99,7 +99,6 @@ impl App for TimbaApp {
                         let scale_x = available_size.x / original_size.x;
                         let scale_y = available_size.y / original_size.y;
 
-                        // Removed the 1.0 cap entirely so it always scales up or down
                         let scale = scale_x.min(scale_y);
 
                         let displayed_size =
@@ -119,6 +118,10 @@ impl App for TimbaApp {
                                     self.is_maximized,
                                 ));
                             }
+
+                            if img_response.secondary_clicked() {
+                                ui.ctx().copy_text(self.image_path.clone());
+                            }
                         });
                     }
                 } else {
@@ -133,6 +136,10 @@ impl App for TimbaApp {
             self.is_maximized = !self.is_maximized;
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::Maximized(self.is_maximized));
+        }
+
+        if interact_response.secondary_clicked() {
+            ui.ctx().copy_text(self.image_path.clone());
         }
     }
 }
@@ -156,7 +163,6 @@ impl TimbaApp {
     fn load_image(&mut self, ctx: &egui::Context) {
         let path = Path::new(&self.image_path);
 
-        // Check if it's a GIF
         if path.extension().and_then(|s| s.to_str()) == Some("gif") {
             self.load_gif(ctx);
         } else {
@@ -164,11 +170,9 @@ impl TimbaApp {
         }
     }
 
-    // The load_image function
     fn load_static_image(&mut self, ctx: &egui::Context) {
         let path = Path::new(&self.image_path);
 
-        // Try to load the image
         match image::open(path) {
             Ok(img) => {
                 let width = img.width() as f32;
@@ -177,10 +181,8 @@ impl TimbaApp {
                 let image_buffer = img.to_rgba8();
                 let pixels = image_buffer.into_vec();
 
-                // Store original dimensions
                 self.original_size = Some(egui::vec2(width, height));
 
-                // Create texture
                 let texture = ctx.load_texture(
                     path.file_name().unwrap().to_string_lossy(),
                     egui::ColorImage::from_rgba_unmultiplied(size, &pixels),
@@ -188,7 +190,6 @@ impl TimbaApp {
                 );
 
                 self.texture = Some(texture);
-                // Ensure static images don't animate
                 self.is_animated = false;
                 self.gif_frames = None;
             }
@@ -210,7 +211,6 @@ impl TimbaApp {
 
         let reader = BufReader::new(file);
 
-        // Added error handling to prevent thread panic on corrupted GIFs
         let decoder = match GifDecoder::new(reader) {
             Ok(d) => d,
             Err(e) => {
@@ -260,7 +260,6 @@ impl TimbaApp {
             if self.current_frame < frames.len() {
                 let color_image = frames[self.current_frame].0.clone();
 
-                // BUG FIX: Set the existing texture instead of loading a new one to prevent GPU memory leak
                 if let Some(ref mut texture) = self.texture {
                     texture.set(color_image, egui::TextureOptions::LINEAR);
                 } else {
