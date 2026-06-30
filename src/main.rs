@@ -1,12 +1,12 @@
 use std::env;
 use std::path::Path;
 use std::os::unix::net::{UnixStream, UnixListener};
-use std::io::{Read, Write};
+use std::io::{Read, Write, BufReader};
 use std::thread;
 use std::sync::mpsc;
 use std::fs;
 use eframe::{egui, App, Frame};
-use image::io::Reader as ImageReader;
+use image::ImageReader;
 use image::codecs::gif::GifDecoder;
 use image::AnimationDecoder;
 use image::GenericImageView;
@@ -26,9 +26,9 @@ struct TimbaApp {
 }
 
 impl App for TimbaApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
         // Always request repaint to keep checking for new messages
-        ctx.request_repaint();
+        ui.ctx().request_repaint();
 
         // Check for new image path requests
         if let Ok(new_path) = self.image_receiver.try_recv() {
@@ -44,14 +44,14 @@ impl App for TimbaApp {
             self.is_animated = false;
 
             // Load the image immediately
-            self.load_image(ctx);
+            self.load_image(ui.ctx());
             println!(">>> Image loaded and UI updated");
         }
 
         // Remove the redundant loading logic - only load on startup if no image is set
         if self.texture.is_none() && !self.image_path.is_empty() && self.error_message.is_none() {
             // This should only happen on initial startup
-            self.load_image(ctx);
+            self.load_image(ui.ctx());
         }
 
         // Handle GIF animation timing
@@ -65,14 +65,14 @@ impl App for TimbaApp {
                     if current_time.duration_since(self.last_frame_time) >= frame_duration {
                         self.current_frame = (self.current_frame + 1) % frames.len();
                         self.last_frame_time = current_time;
-                        self.update_texture(ctx);
+                        self.update_texture(ui.ctx());
                     }
                 }
             }
         }
 
         // Rest of the update function remains the same
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             // Show error message if any
             if let Some(error) = &self.error_message {
                 ui.label(format!("Error: {}", error));
@@ -189,8 +189,10 @@ impl TimbaApp {
             }
         };
 
+        let reader = BufReader::new(file);
+
         // Added error handling to prevent thread panic on corrupted GIFs
-        let decoder = match GifDecoder::new(file) {
+        let decoder = match GifDecoder::new(reader) {
             Ok(d) => {
                 d
             }
