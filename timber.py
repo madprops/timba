@@ -13,11 +13,14 @@ BINARY_PATH = "target/release/timba"
 
 def get_all_images(base_dir):
     images = []
-    for root, dirs, files in os.walk(base_dir):
+
+    for root, dirs_, files in os.walk(base_dir):
         for file in files:
             ext = os.path.splitext(file)[1].lower()
+
             if ext in VALID_EXTENSIONS:
                 images.append(os.path.join(root, file))
+
     return images
 
 
@@ -35,6 +38,7 @@ def send_to_socket(image_path):
 
 def main():
     images = get_all_images(BASE_DIR)
+
     if not images:
         print("No images found. Exiting.")
         return
