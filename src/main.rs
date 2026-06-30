@@ -45,7 +45,6 @@ impl App for TimbaApp {
 
             // Load the image immediately
             self.load_image(ctx);
-
             println!(">>> Image loaded and UI updated");
         }
 
@@ -59,6 +58,7 @@ impl App for TimbaApp {
         if self.is_animated {
             if let Some(ref frames) = self.gif_frames {
                 let current_time = std::time::Instant::now();
+
                 if self.current_frame < frames.len() {
                     let frame_duration = frames[self.current_frame].1;
 
@@ -104,10 +104,11 @@ impl App for TimbaApp {
 
                     ui.horizontal(|ui| {
                         ui.add_space(padding_x);
-                        ui.add(egui::Image::new(texture, displayed_size));
+                        ui.add(egui::Image::new(texture).fit_to_exact_size(displayed_size));
                     });
                 }
-            } else {
+            }
+            else {
                 ui.label("Loading image...");
             }
         });
@@ -135,7 +136,8 @@ impl TimbaApp {
         // Check if it's a GIF
         if path.extension().and_then(|s| s.to_str()) == Some("gif") {
             self.load_gif(ctx);
-        } else {
+        }
+        else {
             self.load_static_image(ctx);
         }
     }
@@ -149,7 +151,7 @@ impl TimbaApp {
             Ok(img) => {
                 let width = img.width() as f32;
                 let height = img.height() as f32;
-                let size = [img.width() as _, img.height() as _];
+                let size = [img.width() as usize, img.height() as usize];
                 let image_buffer = img.to_rgba8();
                 let pixels = image_buffer.into_vec();
 
@@ -160,7 +162,7 @@ impl TimbaApp {
                 let texture = ctx.load_texture(
                     path.file_name().unwrap().to_string_lossy(),
                     egui::ColorImage::from_rgba_unmultiplied(size, &pixels),
-                    egui::TextureFilter::Linear,
+                    egui::TextureOptions::LINEAR,
                 );
 
                 self.texture = Some(texture);
@@ -178,14 +180,26 @@ impl TimbaApp {
 
     fn load_gif(&mut self, ctx: &egui::Context) {
         let file = match std::fs::File::open(&self.image_path) {
-            Ok(file) => file,
+            Ok(file) => {
+                file
+            }
             Err(e) => {
                 self.error_message = Some(format!("Failed to open file: {}", e));
                 return;
             }
         };
 
-        let decoder = GifDecoder::new(file).unwrap();
+        // Added error handling to prevent thread panic on corrupted GIFs
+        let decoder = match GifDecoder::new(file) {
+            Ok(d) => {
+                d
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Failed to initialize GIF decoder: {}", e));
+                return;
+            }
+        };
+
         let frames = decoder.into_frames();
         let mut gif_frames = Vec::new();
 
@@ -193,7 +207,7 @@ impl TimbaApp {
             match frame_result {
                 Ok(frame) => {
                     let delay = frame.delay();
-                    let duration = std::time::Duration::from(delay);
+                    let duration: std::time::Duration = delay.into();
                     let buffer = frame.into_buffer();
                     let (width, height) = buffer.dimensions();
 
@@ -225,19 +239,26 @@ impl TimbaApp {
     fn update_texture(&mut self, ctx: &egui::Context) {
         if let Some(ref frames) = self.gif_frames {
             if self.current_frame < frames.len() {
-                let texture = ctx.load_texture(
-                    format!("gif_frame_{}", self.current_frame),
-                    frames[self.current_frame].0.clone(),
-                    egui::TextureFilter::Linear,
-                );
-                self.texture = Some(texture);
+                let color_image = frames[self.current_frame].0.clone();
+
+                // BUG FIX: Set the existing texture instead of loading a new one to prevent GPU memory leak
+                if let Some(ref mut texture) = self.texture {
+                    texture.set(color_image, egui::TextureOptions::LINEAR);
+                }
+                else {
+                    self.texture = Some(ctx.load_texture(
+                        "gif_frame",
+                        color_image,
+                        egui::TextureOptions::LINEAR,
+                    ));
+                }
             }
         }
     }
 }
 
 // Load the embedded icon
-fn load_embedded_icon() -> Option<eframe::IconData> {
+fn load_embedded_icon() -> Option<egui::IconData> {
     // Include the icon directly in the binary
     let icon_bytes = include_bytes!("../img/icon.png");
 
@@ -248,7 +269,7 @@ fn load_embedded_icon() -> Option<eframe::IconData> {
 
             println!("Successfully loaded embedded icon: {}x{} pixels", width, height);
 
-            Some(eframe::IconData {
+            Some(egui::IconData {
                 rgba: rgba.into_raw(),
                 width,
                 height,
@@ -262,18 +283,17 @@ fn load_embedded_icon() -> Option<eframe::IconData> {
 }
 
 fn get_image_dimensions(path: &str) -> Option<(u32, u32)> {
-    ImageReader::open(path).ok()?
-        .into_dimensions().ok()
+    ImageReader::open(path).ok()?.into_dimensions().ok()
 }
 
-fn main() {
+fn main() -> eframe::Result<()> {
     // Get command line arguments
     let args: Vec<String> = env::args().collect();
 
     // Check if an image path was provided
     if args.len() < 2 {
         eprintln!("Usage: {} <image_path>", args[0]);
-        return;
+        return Ok(());
     }
 
     let image_path = args[1].clone();
@@ -283,7 +303,7 @@ fn main() {
 
     if !Path::new(&image_path).exists() {
         eprintln!("Error: Image path does not exist: {}", image_path);
-        return;
+        return Ok(());
     }
 
     // Try to connect to existing instance
@@ -294,13 +314,13 @@ fn main() {
         // Send the full path to the running instance
         if let Err(e) = stream.write_all(image_path.as_bytes()) {
             eprintln!("Failed to send path to existing instance: {}", e);
-            return;
+            return Ok(());
         }
 
         // Ensure the stream is flushed so all data is sent
         if let Err(e) = stream.flush() {
             eprintln!("Failed to flush stream: {}", e);
-            return;
+            return Ok(());
         }
 
         // Wait for acknowledgment
@@ -310,13 +330,17 @@ fn main() {
             Ok(bytes) if bytes > 0 => {
                 let response = std::str::from_utf8(&buffer[0..bytes]).unwrap_or("???");
                 println!("Response from instance: {}", response);
-            },
-            Ok(_) => println!("No response received from instance"),
-            Err(e) => println!("Error waiting for acknowledgment: {}", e),
+            }
+            Ok(_) => {
+                println!("No response received from instance");
+            }
+            Err(e) => {
+                println!("Error waiting for acknowledgment: {}", e);
+            }
         }
 
         println!("Image sent to existing Timba instance");
-        return; // Exit this instance
+        return Ok(()); // Exit this instance
     }
 
     // If we reach here, no existing instance, so become the singleton
@@ -334,39 +358,45 @@ fn main() {
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
                     let mut buffer = [0; 4096];  // Create a fixed-size buffer for the path
+
                     match stream.read(&mut buffer) {
                         Ok(bytes_read) if bytes_read > 0 => {
                             // Convert the bytes to a string, ignoring any non-UTF8 characters
                             let path = String::from_utf8_lossy(&buffer[0..bytes_read]).into_owned();
                             println!("Socket received path: {}", path);
+
                             // Make sure we're getting a valid path
                             if Path::new(&path).exists() {
                                 println!("Path exists, sending to main thread");
+
                                 // Send path to main thread and acknowledge receipt
                                 if let Err(e) = tx.send(path) {
                                     eprintln!("Failed to send image path internally: {}", e);
                                     let _ = stream.write_all(b"ERR");
-                                } else {
+                                }
+                                else {
                                     // Send acknowledgment back to client
                                     let _ = stream.write_all(b"OK");
                                 }
-                            } else {
+                            }
+                            else {
                                 eprintln!("Received path does not exist: {}", path);
                                 let _ = stream.write_all(b"ERR");
                             }
-                        },
+                        }
                         Ok(_) => {
                             eprintln!("Received empty path over socket");
                             let _ = stream.write_all(b"ERR");
-                        },
+                        }
                         Err(e) => {
                             eprintln!("Error reading from socket: {}", e);
                             let _ = stream.write_all(b"ERR");
-                        },
+                        }
                     }
                 }
             }
-        } else {
+        }
+        else {
             eprintln!("Failed to bind to socket {}", SOCKET_PATH);
         }
     });
@@ -386,27 +416,33 @@ fn main() {
             (width as f32 + 40.0).min(1200.0), // Cap max size
             (height as f32 + 60.0).min(800.0)
         )
-    } else {
+    }
+    else {
         egui::vec2(800.0, 600.0)
     };
 
     let app = TimbaApp::new(image_path, rx);
-    // Use embedded icon instead of loading from file system
-    let icon_data = load_embedded_icon();
+
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size(initial_size)
+        .with_resizable(true);
+
+    if let Some(icon) = load_embedded_icon() {
+        viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
 
     let options = eframe::NativeOptions {
-        initial_window_size: Some(initial_size),
-        resizable: true,
-        icon_data,
+        viewport,
         ..Default::default()
     };
 
     eframe::run_native(
         "Timba",
         options,
-        Box::new(|_cc| Box::new(app)),
-    );
+        Box::new(|_cc| Ok(Box::new(app))),
+    )?;
 
     // Clean up socket when exiting normally
     let _ = fs::remove_file(SOCKET_PATH);
+    Ok(())
 }
