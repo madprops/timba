@@ -5,7 +5,7 @@ import subprocess
 import socket
 
 BASE_DIR = "/mnt/struct_1/pics/"
-INTERVAL_SECONDS = 30
+INTERVAL_SECONDS = 60
 VALID_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif"}
 SOCKET_PATH = "/tmp/timba.sock"
 BINARY_PATH = "target/release/timba"
