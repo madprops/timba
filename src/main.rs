@@ -1,7 +1,6 @@
 use eframe::{egui, App, Frame};
 use image::codecs::gif::GifDecoder;
 use image::AnimationDecoder;
-use image::ImageReader;
 use std::env;
 use std::fs;
 use std::io::{BufReader, Read, Write};
@@ -256,15 +255,9 @@ impl TimbaApp {
     }
 }
 
-fn get_image_dimensions(path: &str) -> Option<(u32, u32)> {
-    ImageReader::open(path).ok()?.into_dimensions().ok()
-}
-
 fn main() -> eframe::Result<()> {
-    // Get command line arguments
     let args: Vec<String> = env::args().collect();
 
-    // Check if an image path was provided
     if args.len() < 2 {
         eprintln!("Usage: {} <image_path>", args[0]);
         return Ok(());
@@ -272,7 +265,6 @@ fn main() -> eframe::Result<()> {
 
     let image_path = args[1].clone();
 
-    // Normalize and validate the path
     let image_path = std::fs::canonicalize(image_path)
         .unwrap_or_else(|_| Path::new(&args[1]).to_path_buf())
         .to_string_lossy()
@@ -283,27 +275,22 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
-    // Try to connect to existing instance
     if let Ok(mut stream) = UnixStream::connect(SOCKET_PATH) {
-        // Send the image path to the existing instance
         println!(
             "Connected to existing Timba instance, sending path: {}",
             image_path
         );
 
-        // Send the full path to the running instance
         if let Err(e) = stream.write_all(image_path.as_bytes()) {
             eprintln!("Failed to send path to existing instance: {}", e);
             return Ok(());
         }
 
-        // Ensure the stream is flushed so all data is sent
         if let Err(e) = stream.flush() {
             eprintln!("Failed to flush stream: {}", e);
             return Ok(());
         }
 
-        // Wait for acknowledgment
         let mut buffer = [0; 3];
 
         match stream.read(&mut buffer) {
@@ -320,36 +307,28 @@ fn main() -> eframe::Result<()> {
         }
 
         println!("Image sent to existing Timba instance");
-        return Ok(()); // Exit this instance
+        return Ok(());
     }
 
-    // If we reach here, no existing instance, so become the singleton
-    // Remove any stale socket file
     let _ = fs::remove_file(SOCKET_PATH);
 
-    // Create communication channel for the socket listener thread
     let (tx, rx) = mpsc::channel();
 
-    // Start listening for new connections
     thread::spawn(move || {
         if let Ok(listener) = UnixListener::bind(SOCKET_PATH) {
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
-                    let mut buffer = [0; 4096]; // Create a fixed-size buffer for the path
+                    let mut buffer = [0; 4096];
 
                     match stream.read(&mut buffer) {
                         Ok(bytes_read) if bytes_read > 0 => {
-                            // Convert the bytes to a string, ignoring any non-UTF8 characters
                             let path = String::from_utf8_lossy(&buffer[0..bytes_read]).into_owned();
 
-                            // Make sure we're getting a valid path
                             if Path::new(&path).exists() {
-                                // Send path to main thread and acknowledge receipt
                                 if let Err(e) = tx.send(path) {
                                     eprintln!("Failed to send image path internally: {}", e);
                                     let _ = stream.write_all(b"ERR");
                                 } else {
-                                    // Send acknowledgment back to client
                                     let _ = stream.write_all(b"OK");
                                 }
                             } else {
@@ -373,7 +352,6 @@ fn main() -> eframe::Result<()> {
         }
     });
 
-    // Set up cleanup of socket file when program exits
     let socket_path = SOCKET_PATH.to_string();
 
     ctrlc::set_handler(move || {
@@ -383,21 +361,9 @@ fn main() -> eframe::Result<()> {
     })
     .expect("Error setting Ctrl-C handler");
 
-    // Get image dimensions for optimal window sizing
-    let initial_size = if let Some((width, height)) = get_image_dimensions(&image_path) {
-        egui::vec2(
-            (width as f32 + 40.0).min(1200.0), // Cap max size
-            (height as f32 + 60.0).min(800.0),
-        )
-    } else {
-        egui::vec2(800.0, 600.0)
-    };
-
     let app = TimbaApp::new(image_path, rx);
 
-    let viewport = egui::ViewportBuilder::default()
-        .with_inner_size(initial_size)
-        .with_resizable(true);
+    let viewport = egui::ViewportBuilder::default().with_resizable(true);
 
     let options = eframe::NativeOptions {
         viewport,
@@ -406,7 +372,6 @@ fn main() -> eframe::Result<()> {
 
     eframe::run_native("Timba", options, Box::new(|_cc| Ok(Box::new(app))))?;
 
-    // Clean up socket when exiting normally
     let _ = fs::remove_file(SOCKET_PATH);
     Ok(())
 }
