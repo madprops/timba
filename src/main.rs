@@ -67,7 +67,17 @@ impl App for TimbaApp {
             self.load_image(ui.ctx());
         }
 
-        let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
+        let scroll_y = ui.input(|i| {
+            let mut scroll = 0.0;
+
+            for event in &i.events {
+                if let egui::Event::MouseWheel { delta, .. } = event {
+                    scroll += delta.y;
+                }
+            }
+
+            scroll
+        });
 
         if scroll_y != 0.0 {
             if !self.history.is_empty() {
@@ -129,10 +139,8 @@ impl App for TimbaApp {
                 if let Some(texture) = &self.texture {
                     if let Some(original_size) = self.original_size {
                         let available_size = ui.available_size();
-
                         let scale_x = available_size.x / original_size.x;
                         let scale_y = available_size.y / original_size.y;
-
                         let scale = scale_x.min(scale_y);
 
                         let displayed_size =
@@ -417,7 +425,6 @@ fn main() -> eframe::Result<()> {
     .expect("Error setting Ctrl-C handler");
 
     let app = TimbaApp::new(image_path, rx);
-
     let viewport = egui::ViewportBuilder::default().with_resizable(true);
 
     let options = eframe::NativeOptions {
@@ -426,7 +433,6 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native("Timba", options, Box::new(|_cc| Ok(Box::new(app))))?;
-
     let _ = fs::remove_file(SOCKET_PATH);
     Ok(())
 }
