@@ -32,7 +32,13 @@ impl App for TimbaApp {
             self.is_maximized = real_maximized_state;
         }
 
-        if let Ok(new_path) = self.image_receiver.try_recv() {
+        let mut latest_path = None;
+
+        while let Ok(new_path) = self.image_receiver.try_recv() {
+            latest_path = Some(new_path);
+        }
+
+        if let Some(new_path) = latest_path {
             self.image_path = new_path;
             self.texture = None;
             self.error_message = None;
@@ -44,6 +50,7 @@ impl App for TimbaApp {
         }
 
         let mut new_dropped_path = None;
+
         ui.input(|i| {
             if !i.raw.dropped_files.is_empty() {
                 if let Some(path) = &i.raw.dropped_files[0].path {
