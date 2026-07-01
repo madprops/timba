@@ -22,6 +22,8 @@ struct TimbaApp {
     last_frame_time: std::time::Instant,
     is_animated: bool,
     is_maximized: bool,
+    history: Vec<String>,
+    history_index: usize,
 }
 
 impl App for TimbaApp {
@@ -32,35 +34,30 @@ impl App for TimbaApp {
             self.is_maximized = real_maximized_state;
         }
 
-        let mut latest_path = None;
+        let mut load_path = None;
 
         while let Ok(new_path) = self.image_receiver.try_recv() {
-            latest_path = Some(new_path);
+            load_path = Some(new_path);
         }
-
-        if let Some(new_path) = latest_path {
-            self.image_path = new_path;
-            self.texture = None;
-            self.error_message = None;
-            self.original_size = None;
-            self.gif_frames = None;
-            self.current_frame = 0;
-            self.is_animated = false;
-            self.load_image(ui.ctx());
-        }
-
-        let mut new_dropped_path = None;
 
         ui.input(|i| {
             if !i.raw.dropped_files.is_empty() {
                 if let Some(path) = &i.raw.dropped_files[0].path {
-                    new_dropped_path = Some(path.clone());
+                    load_path = Some(path.to_string_lossy().into_owned());
                 }
             }
         });
 
-        if let Some(path) = new_dropped_path {
-            self.image_path = path.to_string_lossy().into_owned();
+        if let Some(path) = load_path {
+            if !self.history.contains(&path) {
+                self.history.push(path.clone());
+            }
+
+            if let Some(index) = self.history.iter().position(|p| p == &path) {
+                self.history_index = index;
+            }
+
+            self.image_path = path;
             self.texture = None;
             self.error_message = None;
             self.original_size = None;
@@ -68,6 +65,36 @@ impl App for TimbaApp {
             self.current_frame = 0;
             self.is_animated = false;
             self.load_image(ui.ctx());
+        }
+
+        let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
+
+        if scroll_y != 0.0 {
+            if !self.history.is_empty() {
+                let mut new_index = self.history_index;
+
+                if scroll_y > 0.0 {
+                    if self.history_index > 0 {
+                        new_index -= 1;
+                    }
+                } else if scroll_y < 0.0 {
+                    if (self.history_index + 1) < self.history.len() {
+                        new_index += 1;
+                    }
+                }
+
+                if new_index != self.history_index {
+                    self.history_index = new_index;
+                    self.image_path = self.history[self.history_index].clone();
+                    self.texture = None;
+                    self.error_message = None;
+                    self.original_size = None;
+                    self.gif_frames = None;
+                    self.current_frame = 0;
+                    self.is_animated = false;
+                    self.load_image(ui.ctx());
+                }
+            }
         }
 
         if self.texture.is_none() && !self.image_path.is_empty() && self.error_message.is_none() {
@@ -155,7 +182,7 @@ impl TimbaApp {
     fn new(image_path: String, image_receiver: mpsc::Receiver<String>) -> Self {
         Self {
             texture: None,
-            image_path,
+            image_path: image_path.clone(),
             error_message: None,
             original_size: None,
             image_receiver,
@@ -164,6 +191,8 @@ impl TimbaApp {
             last_frame_time: std::time::Instant::now(),
             is_animated: false,
             is_maximized: false,
+            history: vec![image_path],
+            history_index: 0,
         }
     }
 
