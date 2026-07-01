@@ -67,7 +67,7 @@ impl App for TimbaApp {
             self.load_image(ui.ctx());
         }
 
-        let scroll_y = ui.input(|i| i.smooth_scroll_delta.y);
+        let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
 
         if scroll_y != 0.0 {
             if !self.history.is_empty() {
