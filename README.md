@@ -7,3 +7,5 @@ receives an argument, which is an image path.
 double click toggles maximize.
 
 right click copies image path.
+
+wheel to traverse history.
